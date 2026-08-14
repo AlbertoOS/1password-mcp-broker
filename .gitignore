@@ -1,0 +1,35 @@
+# Private local planning; never publish working notes.
+/TODO.md
+
+# Node and test artifacts
+node_modules/
+dist/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# Local credentials and state
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.local/
+.state/
+
+# Editor and OS artifacts
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary verification artifacts
+.tmp/
+tmp/
+receipts/
+spool/
