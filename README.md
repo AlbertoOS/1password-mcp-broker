@@ -87,8 +87,15 @@ Before a real backend or any credential-consuming handoff, the project requires:
    for the selected backend; and
 4. explicit human approval for the capability.
 
+The currently proposed first workflow is a policy-defined HTTPS
+Authorization-header handoff for an authorization probe. It remains design-only
+until its caller-identity, policy-provisioning, provider, egress, and review
+gates are met; see [ADR 0002](docs/adr/0002-fixed-https-authorization-handoff.md)
+and [the handoff design](docs/designs/fixed-https-handoff.md).
+
 Write, destructive, permission, document-ingestion, desktop-auth,
-service-account, and HTTP capabilities are all separately gated future work.
+service-account, and general-purpose HTTP capabilities are all separately gated
+future work.
 
 ## Contributing
 

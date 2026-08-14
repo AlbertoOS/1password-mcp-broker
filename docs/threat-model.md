@@ -116,3 +116,17 @@ permission change, maintainers must complete all of the following:
 6. obtain independent security review; and
 7. obtain explicit human approval before connecting a live backend or running a
    real operation.
+
+## Proposed HTTPS handoff boundary
+
+[ADR 0002](adr/0002-fixed-https-authorization-handoff.md) and the
+[fixed HTTPS handoff design](designs/fixed-https-handoff.md) specify the chosen
+first future operation: a policy-defined authorization probe that injects a
+policy-selected secret into a fixed Authorization header for one fixed HTTPS
+request and returns only a coarse outcome.
+
+This expands the future threat model with destination, egress, DNS rebinding,
+private/link-local/reserved-address resolution, TLS, redirect, rate-limit, and
+caller-identity risks. It remains blocked because M0 has no real provider, no
+caller authentication, and no policy-provisioning mechanism. No implementation
+may treat the proposed ADR as approval to make a live request.
