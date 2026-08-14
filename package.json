@@ -4,6 +4,12 @@
   "private": true,
   "description": "Deny-by-default 1Password MCP credential broker prototype",
   "license": "MIT",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
   "type": "module",
   "engines": {
     "node": ">=24.19.0 <25"
@@ -12,6 +18,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "package:check": "node scripts/verify-package.mjs",
     "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
