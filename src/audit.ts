@@ -1,6 +1,6 @@
 export type SafeAuditEvent = {
   tool: "capability_status" | "list_approved_metadata";
-  outcome: "allowed";
+  outcome: "allowed" | "blocked";
   recordCount?: number;
 };
 

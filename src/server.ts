@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import { CapabilityPolicy } from "./capability-policy.js";
-import { NullAuditSink, type AuditSink } from "./audit.js";
+import { NullAuditSink, type AuditSink, type SafeAuditEvent } from "./audit.js";
 import { FakeMetadataBackend, type MetadataBackend } from "./fake-metadata-backend.js";
 
 const emptyInputSchema = z.object({}).strict();
@@ -19,6 +19,23 @@ const metadataDiscoverySchema = z.object({
     }),
   ),
 });
+const unavailableMetadataResponse = {
+  content: [{ type: "text" as const, text: "Approved metadata is unavailable." }],
+  isError: true,
+};
+const unavailableCapabilityStatusResponse = {
+  content: [{ type: "text" as const, text: "Capability status is unavailable." }],
+  isError: true,
+};
+
+function recordAuditSafely(audit: AuditSink, event: SafeAuditEvent): boolean {
+  try {
+    audit.record(event);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function createMcpServer(
   policy: CapabilityPolicy,
@@ -42,7 +59,10 @@ export function createMcpServer(
       },
       () => {
         const { enabledCapabilities } = policy.status();
-        audit.record({ tool: "capability_status", outcome: "allowed" });
+        if (!recordAuditSafely(audit, { tool: "capability_status", outcome: "allowed" })) {
+          recordAuditSafely(audit, { tool: "capability_status", outcome: "blocked" });
+          return unavailableCapabilityStatusResponse;
+        }
         return {
           content: [{ type: "text", text: "Capability status returned." }],
           structuredContent: { enabledCapabilities },
@@ -62,14 +82,27 @@ export function createMcpServer(
         annotations: readOnlyAnnotations,
       },
       () => {
-        const structuredContent = metadataDiscoverySchema.parse({
-          records: metadataBackend.listApprovedMetadata(),
-        });
-        audit.record({
-          tool: "list_approved_metadata",
-          outcome: "allowed",
-          recordCount: structuredContent.records.length,
-        });
+        let structuredContent: z.infer<typeof metadataDiscoverySchema>;
+        try {
+          structuredContent = metadataDiscoverySchema.parse({
+            records: metadataBackend.listApprovedMetadata(),
+          });
+        } catch {
+          recordAuditSafely(audit, { tool: "list_approved_metadata", outcome: "blocked" });
+          return unavailableMetadataResponse;
+        }
+
+        if (
+          !recordAuditSafely(audit, {
+            tool: "list_approved_metadata",
+            outcome: "allowed",
+            recordCount: structuredContent.records.length,
+          })
+        ) {
+          recordAuditSafely(audit, { tool: "list_approved_metadata", outcome: "blocked" });
+          return unavailableMetadataResponse;
+        }
+
         return {
           content: [{ type: "text", text: "Approved metadata returned." }],
           structuredContent,

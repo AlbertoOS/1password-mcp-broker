@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { CapabilityPolicy } from "../src/capability-policy.js";
 import { FakeMetadataBackend } from "../src/fake-metadata-backend.js";
-import { InMemoryAuditSink } from "../src/audit.js";
+import { InMemoryAuditSink, type AuditSink } from "../src/audit.js";
 import { createMcpServer } from "../src/server.js";
 
 test("capability status exposes only explicitly enabled capability names", () => {
@@ -163,6 +163,117 @@ test("metadata discovery strips undeclared fields from a backend response", asyn
   await Promise.all([client.close(), server.close()]);
 });
 
+test("metadata discovery sanitizes backend failures before they cross MCP", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const backend = {
+    listApprovedMetadata: () => {
+      throw new Error("synthetic-secret-must-not-cross-the-error-boundary");
+    },
+  } as unknown as FakeMetadataBackend;
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-error-redaction-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-secret-must-not-cross-the-error-boundary/);
+  assert.deepEqual(audit.events(), [{ tool: "list_approved_metadata", outcome: "blocked" }]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery sanitizes schema-validation failures before they cross MCP", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const backend = {
+    listApprovedMetadata: () => [
+      {
+        id: "fixture-005",
+        label: "Example integration",
+        category: 42,
+        concealedValue: "synthetic-secret-must-not-cross-the-schema-error-boundary",
+      },
+    ],
+  } as unknown as FakeMetadataBackend;
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-schema-error-redaction-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.equal(result.structuredContent, undefined);
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-secret-must-not-cross-the-schema-error-boundary/);
+  assert.deepEqual(audit.events(), [{ tool: "list_approved_metadata", outcome: "blocked" }]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery sanitizes an audit failure after approved metadata", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const backend = new FakeMetadataBackend([
+    { id: "fixture-004", label: "Example integration", category: "api-credential" },
+  ]);
+  const audit: AuditSink = {
+    record: () => {
+      throw new Error("synthetic-audit-secret-must-not-cross-the-allowed-boundary");
+    },
+  };
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-allowed-audit-error-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.equal(result.structuredContent, undefined);
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-audit-secret-must-not-cross-the-allowed-boundary/);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery sanitizes an audit failure after backend rejection", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const backend = {
+    listApprovedMetadata: () => {
+      throw new Error("synthetic-backend-secret-must-not-cross-the-blocked-boundary");
+    },
+  } as unknown as FakeMetadataBackend;
+  const audit: AuditSink = {
+    record: () => {
+      throw new Error("synthetic-audit-secret-must-not-cross-the-blocked-boundary");
+    },
+  };
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-blocked-audit-error-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-(backend|audit)-secret-must-not-cross-the-blocked-boundary/);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
 test("capability status records only a safe audit event", async () => {
   const policy = CapabilityPolicy.fromManifest({
     enabledCapabilities: ["capability.status"],
@@ -176,6 +287,30 @@ test("capability status records only a safe audit event", async () => {
   await client.callTool({ name: "capability_status", arguments: {} });
 
   assert.deepEqual(audit.events(), [{ tool: "capability_status", outcome: "allowed" }]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("capability status sanitizes an audit failure before it crosses MCP", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status"],
+  });
+  const audit: AuditSink = {
+    record: () => {
+      throw new Error("synthetic-capability-status-audit-secret-must-not-cross");
+    },
+  };
+  const server = createMcpServer(policy, new FakeMetadataBackend([]), audit);
+  const client = new Client({ name: "broker-status-audit-error-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "capability_status", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Capability status is unavailable." }]);
+  assert.equal(result.structuredContent, undefined);
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-capability-status-audit-secret-must-not-cross/);
 
   await Promise.all([client.close(), server.close()]);
 });
