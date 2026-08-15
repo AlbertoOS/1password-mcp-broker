@@ -50,7 +50,8 @@ capability, all of the following are required:
 
 1. a real caller-authentication and authorization design, because current stdio
    transport does not establish a strong caller identity;
-2. a versioned policy schema and a safe provisioning mechanism;
+2. a versioned policy schema and a safe provisioning mechanism, as proposed in
+   [ADR 0003](0003-signed-local-policy-bundles.md);
 3. an approved provider adapter that resolves a policy-selected secret without
    exposing it to MCP output, logs, errors, or persistent state;
 4. a direct HTTP client configuration that refuses redirects and cannot inherit

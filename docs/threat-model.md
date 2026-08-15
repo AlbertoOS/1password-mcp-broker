@@ -126,7 +126,11 @@ policy-selected secret into a fixed Authorization header for one fixed HTTPS
 request and returns only a coarse outcome.
 
 This expands the future threat model with destination, egress, DNS rebinding,
-private/link-local/reserved-address resolution, TLS, redirect, rate-limit, and
-caller-identity risks. It remains blocked because M0 has no real provider, no
-caller authentication, and no policy-provisioning mechanism. No implementation
-may treat the proposed ADR as approval to make a live request.
+private/link-local/reserved-address resolution, TLS, redirect, rate-limit,
+caller-identity, policy-integrity, signing-key source, descriptor-relative
+filesystem traversal, durable anti-rollback state, crash-consistent activation,
+rollback authorization, and rollback risks. It remains blocked because M0 has no
+real provider, no caller authentication, and no policy-provisioning mechanism. [ADR 0003](adr/0003-signed-local-policy-bundles.md)
+and its [policy-bundle design](designs/signed-local-policy-bundles.md) specify
+the proposed signed local-policy controls. No implementation may treat the
+proposed ADRs as approval to make a live request.
