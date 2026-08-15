@@ -6,7 +6,11 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { CapabilityPolicy } from "../src/capability-policy.js";
-import { FakeMetadataBackend } from "../src/fake-metadata-backend.js";
+import {
+  FakeMetadataBackend,
+  listSyntheticMetadataFixtures,
+  type MetadataRecord,
+} from "../src/fake-metadata-backend.js";
 import { InMemoryAuditSink, type AuditSink } from "../src/audit.js";
 import { createMcpServer } from "../src/server.js";
 
@@ -109,9 +113,7 @@ test("metadata discovery is registered only when its capability is enabled", asy
   const policy = CapabilityPolicy.fromManifest({
     enabledCapabilities: ["capability.status", "metadata.discovery"],
   });
-  const backend = new FakeMetadataBackend([
-    { id: "fixture-001", label: "Example integration", category: "api-credential" },
-  ]);
+  const backend = new FakeMetadataBackend(["fixture-001"]);
   const server = createMcpServer(policy, backend);
   const client = new Client({ name: "broker-metadata-test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -135,18 +137,75 @@ test("metadata discovery is registered only when its capability is enabled", asy
   await Promise.all([client.close(), server.close()]);
 });
 
+test("metadata discovery accepts every registered synthetic fixture", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const fixtures = listSyntheticMetadataFixtures();
+  const backend = new FakeMetadataBackend(fixtures.map((fixture) => fixture.id));
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-all-fixtures-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.deepEqual(result.structuredContent, { records: fixtures });
+  assert.deepEqual(audit.events(), [
+    { tool: "list_approved_metadata", outcome: "allowed", recordCount: fixtures.length },
+  ]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery resists mutation of exported synthetic fixture data", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const fixtureRecords = listSyntheticMetadataFixtures() as MetadataRecord[];
+  const originalLabel = fixtureRecords[0].label;
+  const mutatedLabel = "synthetic-mutated-fixture-value-must-not-cross";
+
+  try {
+    try {
+      fixtureRecords[0].label = mutatedLabel;
+    } catch {}
+
+    const server = createMcpServer(policy, new FakeMetadataBackend(["fixture-001"]));
+    const client = new Client({ name: "broker-fixture-mutation-test-client", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(result.structuredContent, {
+      records: [{ id: "fixture-001", label: originalLabel, category: "api-credential" }],
+    });
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(mutatedLabel));
+
+    await Promise.all([client.close(), server.close()]);
+  } finally {
+    try {
+      fixtureRecords[0].label = originalLabel;
+    } catch {}
+  }
+});
+
 test("metadata discovery rejects an oversized backend response", async () => {
   const policy = CapabilityPolicy.fromManifest({
     enabledCapabilities: ["capability.status", "metadata.discovery"],
   });
   const audit = new InMemoryAuditSink();
-  const backend = new FakeMetadataBackend(
-    Array.from({ length: 101 }, (_, index) => ({
-      id: `fixture-${index}`,
-      label: "Example integration",
-      category: "api-credential",
-    })),
-  );
+  const backend = {
+    listApprovedMetadata: () =>
+      Array.from({ length: 101 }, () => ({
+        id: "fixture-001",
+        label: "Example integration",
+        category: "api-credential",
+      })),
+  } as unknown as FakeMetadataBackend;
   const server = createMcpServer(policy, backend, audit);
   const client = new Client({ name: "broker-oversized-metadata-test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -167,9 +226,11 @@ test("metadata discovery rejects an overlong backend label", async () => {
     enabledCapabilities: ["capability.status", "metadata.discovery"],
   });
   const audit = new InMemoryAuditSink();
-  const backend = new FakeMetadataBackend([
-    { id: "fixture-006", label: "x".repeat(257), category: "api-credential" },
-  ]);
+  const backend = {
+    listApprovedMetadata: () => [
+      { id: "fixture-006", label: "x".repeat(257), category: "api-credential" },
+    ],
+  } as unknown as FakeMetadataBackend;
   const server = createMcpServer(policy, backend, audit);
   const client = new Client({ name: "broker-overlong-label-test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -191,11 +252,11 @@ test("metadata discovery accepts records at every response limit", async () => {
   });
   const audit = new InMemoryAuditSink();
   const boundedRecord = {
-    id: "i".repeat(128),
-    label: "l".repeat(256),
-    category: "c".repeat(64),
+    id: "fixture-001",
+    label: "Example integration",
+    category: "api-credential",
   };
-  const backend = new FakeMetadataBackend(Array.from({ length: 100 }, () => boundedRecord));
+  const backend = new FakeMetadataBackend(Array.from({ length: 100 }, () => "fixture-001"));
   const server = createMcpServer(policy, backend, audit);
   const client = new Client({ name: "broker-metadata-boundary-test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -218,9 +279,11 @@ test("metadata discovery rejects an overlong backend id", async () => {
   });
   const audit = new InMemoryAuditSink();
   const rejectedId = "i".repeat(129);
-  const backend = new FakeMetadataBackend([
-    { id: rejectedId, label: "Example integration", category: "api-credential" },
-  ]);
+  const backend = {
+    listApprovedMetadata: () => [
+      { id: rejectedId, label: "Example integration", category: "api-credential" },
+    ],
+  } as unknown as FakeMetadataBackend;
   const server = createMcpServer(policy, backend, audit);
   const client = new Client({ name: "broker-overlong-id-test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -243,9 +306,11 @@ test("metadata discovery rejects an overlong backend category", async () => {
   });
   const audit = new InMemoryAuditSink();
   const rejectedCategory = "c".repeat(65);
-  const backend = new FakeMetadataBackend([
-    { id: "fixture-007", label: "Example integration", category: rejectedCategory },
-  ]);
+  const backend = {
+    listApprovedMetadata: () => [
+      { id: "fixture-007", label: "Example integration", category: rejectedCategory },
+    ],
+  } as unknown as FakeMetadataBackend;
   const server = createMcpServer(policy, backend, audit);
   const client = new Client({ name: "broker-overlong-category-test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -288,6 +353,78 @@ test("metadata discovery strips undeclared fields from a backend response", asyn
   });
 
   await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery rejects a declared id outside the synthetic fixture registry", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const rejectedId = "synthetic-unregistered-id-must-not-cross";
+  const backend = {
+    listApprovedMetadata: () => [
+      { id: rejectedId, label: "Example integration", category: "api-credential" },
+    ],
+  } as unknown as FakeMetadataBackend;
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-unregistered-id-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.equal(result.structuredContent, undefined);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rejectedId));
+  assert.deepEqual(audit.events(), [{ tool: "list_approved_metadata", outcome: "blocked" }]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery rejects declared label and category values outside the synthetic fixture registry", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const cases = [
+    {
+      marker: "synthetic-unregistered-label-must-not-cross",
+      record: {
+        id: "fixture-001",
+        label: "synthetic-unregistered-label-must-not-cross",
+        category: "api-credential",
+      },
+    },
+    {
+      marker: "synthetic-unregistered-category-must-not-cross",
+      record: {
+        id: "fixture-001",
+        label: "Example integration",
+        category: "synthetic-unregistered-category-must-not-cross",
+      },
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const audit = new InMemoryAuditSink();
+    const backend = {
+      listApprovedMetadata: () => [testCase.record],
+    } as unknown as FakeMetadataBackend;
+    const server = createMcpServer(policy, backend, audit);
+    const client = new Client({ name: `broker-${testCase.marker}-test-client`, version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+    assert.equal(result.isError, true);
+    assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+    assert.equal(result.structuredContent, undefined);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(testCase.marker));
+    assert.deepEqual(audit.events(), [{ tool: "list_approved_metadata", outcome: "blocked" }]);
+
+    await Promise.all([client.close(), server.close()]);
+  }
 });
 
 test("metadata discovery sanitizes backend failures before they cross MCP", async () => {
@@ -350,9 +487,7 @@ test("metadata discovery sanitizes an audit failure after approved metadata", as
   const policy = CapabilityPolicy.fromManifest({
     enabledCapabilities: ["capability.status", "metadata.discovery"],
   });
-  const backend = new FakeMetadataBackend([
-    { id: "fixture-004", label: "Example integration", category: "api-credential" },
-  ]);
+  const backend = new FakeMetadataBackend(["fixture-004"]);
   const audit: AuditSink = {
     record: () => {
       throw new Error("synthetic-audit-secret-must-not-cross-the-allowed-boundary");
