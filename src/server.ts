@@ -6,18 +6,24 @@ import { NullAuditSink, type AuditSink, type SafeAuditEvent } from "./audit.js";
 import { FakeMetadataBackend, type MetadataBackend } from "./fake-metadata-backend.js";
 
 const emptyInputSchema = z.object({}).strict();
+const maxMetadataRecords = 100;
+const maxMetadataIdLength = 128;
+const maxMetadataLabelLength = 256;
+const maxMetadataCategoryLength = 64;
 const capabilityNameSchema = z.enum(["capability.status", "metadata.discovery"]);
 const capabilityStatusSchema = z.object({
   enabledCapabilities: z.array(capabilityNameSchema),
 });
 const metadataDiscoverySchema = z.object({
-  records: z.array(
-    z.object({
-      id: z.string(),
-      label: z.string(),
-      category: z.string(),
-    }),
-  ),
+  records: z
+    .array(
+      z.object({
+        id: z.string().max(maxMetadataIdLength),
+        label: z.string().max(maxMetadataLabelLength),
+        category: z.string().max(maxMetadataCategoryLength),
+      }),
+    )
+    .max(maxMetadataRecords),
 });
 const unavailableMetadataResponse = {
   content: [{ type: "text" as const, text: "Approved metadata is unavailable." }],

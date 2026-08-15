@@ -135,6 +135,133 @@ test("metadata discovery is registered only when its capability is enabled", asy
   await Promise.all([client.close(), server.close()]);
 });
 
+test("metadata discovery rejects an oversized backend response", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const backend = new FakeMetadataBackend(
+    Array.from({ length: 101 }, (_, index) => ({
+      id: `fixture-${index}`,
+      label: "Example integration",
+      category: "api-credential",
+    })),
+  );
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-oversized-metadata-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.equal(result.structuredContent, undefined);
+  assert.deepEqual(audit.events(), [{ tool: "list_approved_metadata", outcome: "blocked" }]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery rejects an overlong backend label", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const backend = new FakeMetadataBackend([
+    { id: "fixture-006", label: "x".repeat(257), category: "api-credential" },
+  ]);
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-overlong-label-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.equal(result.structuredContent, undefined);
+  assert.deepEqual(audit.events(), [{ tool: "list_approved_metadata", outcome: "blocked" }]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery accepts records at every response limit", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const boundedRecord = {
+    id: "i".repeat(128),
+    label: "l".repeat(256),
+    category: "c".repeat(64),
+  };
+  const backend = new FakeMetadataBackend(Array.from({ length: 100 }, () => boundedRecord));
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-metadata-boundary-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(result.structuredContent, { records: Array.from({ length: 100 }, () => boundedRecord) });
+  assert.deepEqual(audit.events(), [
+    { tool: "list_approved_metadata", outcome: "allowed", recordCount: 100 },
+  ]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery rejects an overlong backend id", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const rejectedId = "i".repeat(129);
+  const backend = new FakeMetadataBackend([
+    { id: rejectedId, label: "Example integration", category: "api-credential" },
+  ]);
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-overlong-id-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.equal(result.structuredContent, undefined);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rejectedId));
+  assert.deepEqual(audit.events(), [{ tool: "list_approved_metadata", outcome: "blocked" }]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
+test("metadata discovery rejects an overlong backend category", async () => {
+  const policy = CapabilityPolicy.fromManifest({
+    enabledCapabilities: ["capability.status", "metadata.discovery"],
+  });
+  const audit = new InMemoryAuditSink();
+  const rejectedCategory = "c".repeat(65);
+  const backend = new FakeMetadataBackend([
+    { id: "fixture-007", label: "Example integration", category: rejectedCategory },
+  ]);
+  const server = createMcpServer(policy, backend, audit);
+  const client = new Client({ name: "broker-overlong-category-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "list_approved_metadata", arguments: {} });
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.content, [{ type: "text", text: "Approved metadata is unavailable." }]);
+  assert.equal(result.structuredContent, undefined);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rejectedCategory));
+  assert.deepEqual(audit.events(), [{ tool: "list_approved_metadata", outcome: "blocked" }]);
+
+  await Promise.all([client.close(), server.close()]);
+});
+
 test("metadata discovery strips undeclared fields from a backend response", async () => {
   const policy = CapabilityPolicy.fromManifest({
     enabledCapabilities: ["capability.status", "metadata.discovery"],
