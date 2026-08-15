@@ -71,7 +71,9 @@ production metadata in local fixtures, command arguments, test output, or logs.
 ## Security model
 
 Start with [the threat model](docs/threat-model.md) and
-[ADR 0001](docs/adr/0001-typescript-and-m0-credential-broker.md).
+[ADR 0001](docs/adr/0001-typescript-and-m0-credential-broker.md). Independent
+reviewers can use the public-safe
+[M0 read-only security-review guide](docs/reviews/m0-independent-readonly-security-review.md).
 
 The essential rule is: **default deny, narrow authority, and no plaintext secret
 return to the MCP caller.** Every new capability must be independently gated,
