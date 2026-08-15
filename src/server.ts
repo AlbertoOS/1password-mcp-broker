@@ -3,7 +3,11 @@ import { z } from "zod";
 
 import { CapabilityPolicy } from "./capability-policy.js";
 import { NullAuditSink, type AuditSink, type SafeAuditEvent } from "./audit.js";
-import { FakeMetadataBackend, type MetadataBackend } from "./fake-metadata-backend.js";
+import {
+  FakeMetadataBackend,
+  isSyntheticMetadataRecord,
+  type MetadataBackend,
+} from "./fake-metadata-backend.js";
 
 const emptyInputSchema = z.object({}).strict();
 const maxMetadataRecords = 100;
@@ -14,16 +18,15 @@ const capabilityNameSchema = z.enum(["capability.status", "metadata.discovery"])
 const capabilityStatusSchema = z.object({
   enabledCapabilities: z.array(capabilityNameSchema),
 });
+const metadataRecordSchema = z
+  .object({
+    id: z.string().max(maxMetadataIdLength),
+    label: z.string().max(maxMetadataLabelLength),
+    category: z.string().max(maxMetadataCategoryLength),
+  })
+  .refine(isSyntheticMetadataRecord, "Unapproved synthetic metadata fixture");
 const metadataDiscoverySchema = z.object({
-  records: z
-    .array(
-      z.object({
-        id: z.string().max(maxMetadataIdLength),
-        label: z.string().max(maxMetadataLabelLength),
-        category: z.string().max(maxMetadataCategoryLength),
-      }),
-    )
-    .max(maxMetadataRecords),
+  records: z.array(metadataRecordSchema).max(maxMetadataRecords),
 });
 const unavailableMetadataResponse = {
   content: [{ type: "text" as const, text: "Approved metadata is unavailable." }],
