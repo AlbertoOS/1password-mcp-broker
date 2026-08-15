@@ -15,6 +15,15 @@ not accepted implementation decisions. A future design revision must resolve
 these blockers, define platform-specific guarantees, and receive fresh review
 before any live capability is considered.
 
+## Current disposition
+
+Maintainers defer selection of the first platform, rollback-resistant trust
+anchor, and privileged-local-administration/backup-restore threat assumptions.
+Accordingly, ADR 0003 remains **Proposed** and no policy loader, activation
+ledger, provider adapter, live HTTPS handoff, or secret-consuming capability may
+be implemented. M0 and public-artifact work may continue without resolving this
+decision.
+
 ## Required resolution areas
 
 ### 1. Anchor trusted state against rollback

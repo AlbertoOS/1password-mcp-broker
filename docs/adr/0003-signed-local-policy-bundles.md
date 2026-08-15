@@ -193,7 +193,10 @@ full public-safe record is [the policy-provisioning architecture review](../revi
 These are implementation blockers. This ADR remains **Proposed** and does not
 authorize a loader, provider adapter, live handoff, or secret-consuming
 capability until they have concrete, testable, platform-scoped resolutions and
-fresh independent review.
+fresh independent review. Maintainers have explicitly deferred the platform,
+rollback-resistant trust-anchor, and privileged-local-administration/backup-
+restore assumptions; M0/public-artifact work may continue, but all live policy
+activation remains blocked.
 
 ## Alternatives rejected
 
